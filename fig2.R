@@ -7,54 +7,82 @@ library(tidyverse)
 # load data ---------------------------------------------------------------
 
 set.seed(20220831)
+load('./omicron.RData')
 
-load('../script/xiamen.RData')
-source('./function.R')
+datafile$VaccineGroup <- factor(datafile$VaccineDose,
+                                levels = as.character(0:3),
+                                labels = c('B', 'B', 'B', 'A'))
+datafile$Ct <- factor(datafile$Ct,
+                      levels = c('CtN', 'CtORF1ab'),
+                      labels = c('N gene', 'ORF gene'))
+colors <- ggsci::pal_npg()(2)
 
-# analysis Ct value -------------------------------------------------------
+# figA --------------------------------------------------------------------
 
-DataCtValue <- DataCtValue |>
-  mutate(DateSeq = as.numeric(SampleDate - OnsetDate),
-         VaccineDose = case_when(
-           VaccineDose <= 1 ~ 'Unfully Vaccine',
-           VaccineDose == 2 ~ 'Fully Vaccine',
-           VaccineDose == 3 ~ 'Booster Dose',
-           TRUE ~ as.character(VaccineDose)
-         ))
-
-DataCtValue |>
-  ggplot(mapping = aes(x = DateSeq, y = CtORF1ab, color = CaseType))+
-  geom_line(mapping = aes(group = CaseID),
-            alpha = 0.1)+
-  stat_smooth()
-
-DataCtValue |>
-  ggplot(mapping = aes(x = DateSeq, y = CtN, color = CaseType))+
-  geom_line(mapping = aes(group = CaseID),
-            alpha = 0.1)+
-  geom_hline(yintercept = 35)+
-  stat_smooth()+
-  scale_x_continuous(breaks = seq(-2, 22, 2),
-                     limits = c(-2, 22),
+FigA <- ggplot(data = datafile)+
+  stat_smooth(mapping = aes(x = as.numeric(SampleDate - OnsetDate),
+                            y = value,
+                            color = VaccineGroup,
+                            fill = VaccineGroup),
+              alpha = 0.3,
+              method = lm,
+              formula = y ~ splines::bs(x, df = 4))+
+  geom_hline(yintercept = 30)+
+  coord_cartesian(ylim = c(15, 40))+
+  scale_x_continuous(breaks = seq(0, 30, 10),
+                     limits = c(-5, 30),
                      expand = c(0, 0))+
-  theme_bw()
+  scale_y_continuous(expand = c(0, 0))+
+  scale_color_manual(values = colors,
+                     labels = c('Booster', 'Unbooster'))+
+  scale_fill_manual(values = colors)+
+  theme_classic()+
+  theme(panel.grid.major.x = element_line(color = 'grey'),
+        panel.grid.major = element_line(color = 'grey'),
+        legend.position = c(1, 0.5),
+        legend.justification = c(1, 1))+
+  facet_wrap(.~Ct,
+             scales = 'free')+
+  labs(y = 'Cycle Threshold Value',
+       x = 'Days from Onset Date',
+       color = NULL,
+       title = 'A')+
+  guides(fill = 'none',
+         color = guide_legend(override.aes = list(fill = 'white',
+                                                  title = NULL)))
 
-ggsave(filename = 'cttest.png', width = 5, height = 5)
+FigB <- ggplot(data = datafile)+
+  stat_smooth(mapping = aes(x = as.numeric(SampleDate - OnsetDate),
+                            y = value,
+                            color = CaseType,
+                            fill = CaseType),
+              alpha = 0.3,
+              method = lm,
+              formula = y ~ splines::bs(x, df = 4))+
+  geom_hline(yintercept = 30)+
+  coord_cartesian(ylim = c(15, 40))+
+  scale_x_continuous(breaks = seq(0, 30, 10),
+                     limits = c(-5, 30),
+                     expand = c(0, 0))+
+  scale_y_continuous(expand = c(0, 0))+
+  scale_color_manual(values = colors)+
+  scale_fill_manual(values = colors)+
+  theme_classic()+
+  theme(panel.grid.major.x = element_line(color = 'grey'),
+        panel.grid.major = element_line(color = 'grey'),
+        legend.position = c(1, 0.5),
+        legend.justification = c(1, 1))+
+  facet_wrap(.~Ct,
+             scales = 'free')+
+  labs(y = 'Cycle Threshold Value',
+       x = 'Days from Onset Date',
+       color = NULL,
+       title = 'B')+
+  guides(fill = 'none',
+         color = guide_legend(override.aes = list(fill = 'white',
+                                                  title = NULL)))
 
-DataCtValue |>
-  ggplot(mapping = aes(x = DateSeq, y = CtORF1ab, color = VaccineDose))+
-  geom_line(mapping = aes(group = CaseID),
-            alpha = 0.1)+
-  stat_smooth()
+FigA + FigB +
+  plot_layout(ncol = 1)
 
-DataCtValue |>
-  ggplot(mapping = aes(x = DateSeq, y = CtN, color = VaccineDose))+
-  geom_line(mapping = aes(group = CaseID),
-            alpha = 0.1)+
-  stat_smooth(method = lm, formula = y ~ splines::bs(x, df = 6))
-
-DataCtValue |>
-  ggplot(mapping = aes(x = DateSeq, y = CtN, color = VaccineDose))+
-  geom_line(mapping = aes(group = CaseID),
-            alpha = 0.1)+
-  stat_smooth(method = gam, formula = y ~ s(x))
+ggsave('./test2.pdf', width = 8, height = 6, device = cairo_pdf)

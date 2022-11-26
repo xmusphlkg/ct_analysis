@@ -1,277 +1,298 @@
 
-# packages ----------------------------------------------------------------
-
 library(tidyverse)
 library(openxlsx)
 library(patchwork)
-library(ggraph)
-library(igraph, include.only = 'graph_from_data_frame')
-library(ggsci)
-library(MASS, include.only = 'fitdistr')
-library(epitrix)
-library(EpiEstim)
 
 # load data ---------------------------------------------------------------
 
-set.seed(20220831)
+load('./xiamen.RData')
 
-load('../script/xiamen.RData')
-source('./function.R')
+# panel A -----------------------------------------------------------------
 
-datafile_info <- datafile |>
-  select(id, type, vaccine, control) |>
-  rename('type' = 'type',
-         'vaccine' = 'vaccine') |>
-  mutate(label = id,
-         vaccine = factor(vaccine,
-                          levels = as.character(3:0),
-                          labels = c('A', 'B', 'C', 'C')))
-fill_color <- pal_nejm()(4)
+datafile <-DataCtValue |>
+  group_by(OnsetDate) |>
+  summarise(n = length(unique(CaseID)),
+            .groups = 'drop')
 
-# network plot ------------------------------------------------------------
-
-fig <- graph_from_data_frame(d = datafile_transmission[!is.na(datafile_transmission$id.y),c('id.y', 'id.x')],
-                             vertices = datafile_info,
-                             directed = T)
-fig_a <- ggraph(fig,layout = "kk")+
-  geom_edge_link(arrow = arrow(length = unit(1.5, 'mm')),
-                 end_cap = circle(4, 'mm'),
-                 check_overlap = F,
-                 width = 0.7,
-                 show.legend = F)+
-  geom_node_circle(aes(fill = control,
-                       linetype = vaccine,
-                       r = 0.35),
-                   size = 1,
-                   show.legend = T)+
-  geom_node_text(aes(label = label),
-                 colour = 'white',
-                 show.legend = F) +
-  coord_equal(clip = 'off')+
-  scale_fill_manual(values = fill_color[2:1])+
-  scale_linetype_manual(name = 'Vaccination status',
-                        labels = c('Booster Dose', 'Fully Vaccinated', 'Unfully Vaccinated'),
-                        values = c('solid', 'longdash', 'dotted'))+
-  theme_graph()+
-  theme(
-    legend.position = 'none',
-    # plot.title = element_text(size = 16, hjust = 0, vjust = 0, face = 'bold'),
-    plot.margin = margin(0.2, 0.2, 0.2, 0.2, "cm"),
-    # panel.border = element_rect(colour = "black", fill=NA, size=1),
-    panel.grid.major = element_blank(),
-    panel.grid.minor = element_blank(),
-    strip.text = element_text(size = 12, hjust = .5, vjust = 0, face = 'bold')
-  )+
-  labs(title = 'A')
-
-library(Cairo)
-ggsave('../outcome/fig1_a.pdf', fig_a, width = 6, height = 6, device = cairo_pdf)
-
-# epicurve ----------------------------------------------------------------
-
-datafile$lineage[is.na(datafile$lineage)] <- 'Unknow'
-
-order <- c("BA.2.76", "BA.2.3.7", "BA.5.2",  "Unknow")
-
-fig_b <- ggplot(data = filter(datafile, lineage == order[1]))+
-  geom_col(mapping = aes(x = date, y = 1, fill = factor(lineage)),
-           color = 'white',
-           width = 1,
-           position = position_stack(reverse = TRUE))+
-  scale_fill_manual(values = fill_color)+
-  scale_y_continuous(expand = expansion(add = c(0, 3)),
-                     breaks = seq(0, 16, 4))+
-  scale_x_date(date_labels = "%m/%d",
-               date_breaks = "2 day",
-               expand = expansion(add = c(2, 1)))+
-  coord_equal(ratio = 1)+
-  theme_classic()+
-  theme(panel.grid.major.x = element_blank(),
-        panel.grid.minor.x = element_blank(),
-        axis.text = element_text(color = 'black'),
-        # legend.position = c(0.2, 0.8),
-        legend.position = 'none',
-        legend.justification = c(0, 1),
-        legend.background = element_rect(color = 'black', size = 1),
-        # legend.margin = margin(),
-        plot.margin = margin(0.2, 0.2, 0.2, 0.2, "cm"))+
-  labs(x = "Onset date",
-       y = "Number of infections",
-       title = 'B',
-       fill = "Lineage\nof VOC")
-
-# ggsave('../outcome/fig1_b.pdf', width = 5, height = 4, device = cairo_pdf)
-
-# serial interval ---------------------------------------------------------
-
-infector_276 <- datafile |>
-  filter(lineage == 'BA.2.76') |>
-  select(infector) |>
-  unique() |>
-  left_join(datafile[,c('name', 'date', 'lineage')], by = c(infector = 'name')) |>
-  filter(lineage == 'BA.2.76')
-
-datafile_serial <- datafile |>
-  filter(infector %in% infector_276$infector) |>
-  select(name, infector, date) |>
-  left_join(infector_276[,c("infector", "date")], by = 'infector') |>
-  mutate(date_seq = as.numeric(date.x - date.y))
-
-si_dist <- fit_best(datafile_serial$date_seq)
-
-# ggplot(data = data.frame(x = c(0, 7)), aes(x))+
-#   geom_histogram(data = datafile_serial,
-#                  mapping = aes(x = date_seq,
-#                                y = ..density..),
-#                  binwidth = 1,
-#                  color = 'grey',
-#                  alpha = 0.7) +
-#   stat_function(fun = dgamma, n = 100,
-#                 args = list(shape = si_dist$shape,
-#                             scale = 1/si_dist$rate),
-#                 color = 'red')+
-#   scale_y_continuous(limits = c(0, 0.5),
-#                      expand = c(0, 0))+
-#   scale_x_continuous(breaks = 0:7)+
-#   theme_classic()+
-#   theme(panel.grid.major.x = element_blank(),
-#         panel.grid.minor.x = element_blank(),
-#         axis.text = element_text(color = 'black'),
-#         plot.margin = margin(0.2, 0.2, 0.2, 0.2, "cm"))+
-#   labs(x = "Serial Interval",
-#        y = "Relative frequency",
-#        title = 'C')
-
-# incubation --------------------------------------------------------------
-
-datafile_incubat <- datafile |>
-  filter(lineage == 'BA.2.76') |>
-  filter(infector %in% infector_276$infector) |>
-  select(name, infector, exposedate1, exposedate2, date) |>
-  rename(dateonset = 'date') |>
-  mutate(exposedate1 = if_else(is.na(exposedate1),
-                               exposedate2,
-                               exposedate1),
-         date_seq_1 = dateonset - exposedate1,
-         date_seq_2 = dateonset - exposedate2) |>
-  filter(!is.na(exposedate1))
-datafile_incubat$expose_date <- mapply(expose_date, datafile_incubat$exposedate1, datafile_incubat$exposedate2)
-
-ib_dist <- fit_gamma_incubation_dist(datafile_incubat,
-                                     dateonset,
-                                     exposedate1,
-                                     exposedate2)
-
-fig_c <- ggplot(data = data.frame(x = c(0, 7)), aes(x))+
-  geom_histogram(data = datafile_serial,
-                 mapping = aes(x = date_seq,
-                               y = ..density..,
-                               fill = 'Serial Interval'),
-                 binwidth = 1,
-                 color = 'white',
-                 alpha = 0.9) +
-  stat_function(fun = dgamma, n = 100,
-                args = list(shape = si_dist$shape,
-                            scale = 1/si_dist$rate),
-                mapping = aes(color = 'Fitted Serial Interval'))+
-  stat_function(fun = dgamma, n = 100,
-                args = list(shape = ib_dist$distribution$parameters$shape,
-                            scale = ib_dist$distribution$parameters$scale),
-                mapping = aes(color = 'Fitted Incubation Period'))+
-  scale_y_continuous(limits = c(0, 0.5),
+FigA <- ggplot(data = datafile)+
+  geom_col(mapping = aes(x = as.numeric(OnsetDate - min(OnsetDate)), y = n),
+           position = "stack",
+           fill = 'grey', color = 'black',
+           width = 1)+
+  scale_x_continuous(breaks = seq(0, 40, 10),
+                     limits = c(-5, 40),
                      expand = c(0, 0))+
-  scale_x_continuous(breaks = 0:7)+
-  scale_color_manual(values = fill_color)+
-  scale_fill_manual(values = 'grey')+
+  scale_y_continuous(breaks = seq(0, 15, 5),
+                     limits = c(0, 15),
+                     expand = c(0, 0))+
   theme_classic()+
-  theme(panel.grid.major.x = element_blank(),
-        panel.grid.minor.x = element_blank(),
+  theme(panel.grid.major = element_line(color = 'grey'),
+        axis.text.x = element_blank())+
+  labs(y = 'Incidence',
+       x = NULL,
+       title = 'A')
+
+# panel D -----------------------------------------------------------------
+
+datafile <- DataCtValue |>
+  pivot_longer(cols = c(CtN, CtORF1ab),
+               names_to = 'Ct',
+               values_to = 'value')
+
+FigD <- ggplot(data = datafile)+
+  stat_smooth(mapping = aes(x = as.numeric(SampleDate - OnsetDate),
+                            y = value,
+                            color = Ct,
+                            fill = Ct),
+              alpha = 0.3,
+              method = lm,
+              formula = y ~ splines::bs(x, df = 4))+
+  geom_hline(yintercept = 30)+
+  coord_cartesian(ylim = c(15, 40))+
+  scale_x_continuous(breaks = seq(-5, 20, 5),
+                     limits = c(-5, 20),
+                     expand = c(0, 0))+
+  scale_y_continuous(expand = c(0, 0))+
+  scale_color_manual(values = c("#017098", "#987501"),
+                     labels = c('N gene', 'ORF gene'))+
+  scale_fill_manual(values = c("#017098", "#987501"))+
+  theme_classic()+
+  theme(panel.grid.major.x = element_line(color = 'grey'),
+        axis.text.x = element_blank(),
+        panel.grid.major = element_line(color = 'grey'),
+        legend.position = c(1, 0.5),
+        legend.justification = c(1, 1))+
+  labs(y = 'Cycle Threshold Value',
+       x = NULL,
+       color = NULL,
+       title = 'D')+
+  guides(fill = 'none',
+         color = guide_legend(override.aes = list(fill = 'white',
+                                                  title = NULL)))
+
+# panel B -----------------------------------------------------------------
+
+Ct_complete <- function(i){
+  # i = 3
+  datafile <- DataCtValue |> filter(CaseID == unique(DataCtValue$CaseID)[i])
+  # remove false negative of CtN
+  LastPositiveDate <- datafile |>
+    filter(CtN < 35)
+  LastPositiveDate <- max(LastPositiveDate$SampleDate, na.rm = T)
+  datafile <- datafile[!(datafile$SampleDate < LastPositiveDate & datafile$CtN >= 35),]
+  # remove false negative of CtORF
+  LastPositiveDate <- datafile |>
+    filter(CtORF1ab < 35)
+  LastPositiveDate <- max(LastPositiveDate$SampleDate, na.rm = T)
+  datafile <- datafile[!(datafile$SampleDate < LastPositiveDate & datafile$CtORF1ab >= 35),]
+  datafile$CaseID <- i
+  return(datafile)
+}
+datafile <- lapply(1:length(unique(DataCtValue$CaseID)), Ct_complete)
+datafile <- do.call('rbind', datafile)
+
+library(paletteer)
+colors <- c('#F39B7FFF', '#8491B4FF')
+
+FigB <- ggplot(data = datafile)+
+  geom_line(mapping = aes(x = as.numeric(SampleDate - min(datafile$OnsetDate, na.rm = T)),
+                          y = CaseID,
+                          group = CaseID,
+                          color = CtN),
+            size = 1)+
+  scale_y_reverse()+
+  scale_color_viridis_c(direction = -1,
+                        option = 'D',
+                        limits = c(10, 45))+
+  # scale_color_gradientn(colors = colors,
+  #                       limits = c(10, 45),
+  #                       )+
+  scale_x_continuous(breaks = seq(0, 40, 10),
+                     limits = c(-5, 40),
+                     expand = c(0, 0))+
+  theme_classic()+
+  theme(axis.text.y = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        panel.grid.major.x = element_line(color = 'grey'),
         legend.position = c(1, 1),
-        legend.justification = c(1, 1),
-        axis.text = element_text(color = 'black'),
-        plot.margin = margin(0.2, 0.2, 0.2, 0.2, "cm"))+
-  labs(x = "Days",
-       y = "Relative frequency",
-       title = 'C',
-       colour = NULL,
-       fill = NULL)
+        legend.justification = c(1, 1))+
+  labs(y = 'Infections',
+       x = NULL,
+       color = 'N gene',
+       title = 'B')
 
-# Time-varing reproductive number -----------------------------------------
+# panel C -----------------------------------------------------------------
 
-datafile_rt <- datafile |>
-  filter(lineage == 'BA.2.76') |>
-  group_by(date) |>
-  count() |>
-  as.data.frame() |>
-  complete(date = seq.Date(min(date), max(date)+1, by = 'day'),
-           fill = list(n = 0))
-
-start_dates <- seq(2, nrow(datafile_rt) - 4)
-end_dates <- start_dates + 4
-
-config_lit <- make_config(list(
-  mean_si = si_dist$mean,
-  std_si = si_dist$sd,
-  t_start = start_dates,
-  t_end = end_dates
-))
-names(datafile_rt) <- c('dates', 'I')
-date_st <- min(datafile_rt$dates)
-
-epiestim_res_lit <- estimate_R(incid = datafile_rt,
-                               method = "parametric_si",
-                               config = config_lit)
-outcome <- epiestim_res_lit$R
-outcome$date <- (outcome$t_start + outcome$t_end) / 2 + date_st
-outcome$t_start <- date_st + outcome$t_start
-outcome$t_end <- date_st + outcome$t_end
-
-fig_d <- ggplot(data = outcome,
-       mapping = aes(x = date))+
-  geom_ribbon(
-    mapping = aes(
-      ymin = `Quantile.0.025(R)`,
-      ymax = `Quantile.0.975(R)`
-    ),
-    fill = fill_color[1],
-    alpha = 0.3,
-    show.legend = F
-  ) +
-  geom_line(
-    mapping = aes(y = `Mean(R)`),
-    color = fill_color[1],
-    show.legend = F
-  ) +
-  geom_line(
-    mapping = aes(y = 1),
-    color = 'black',
-    linetype = "dashed",
-    show.legend = F
-  )+
-  scale_y_continuous(expand = expansion(add = c(0, 0)),
-                     breaks = seq(0, 4, 1),
-                     limits = c(0, 4)
-                     )+
-  scale_x_date(date_labels = "%m/%d",
-               date_breaks = "2 day",
-               expand = expansion(add = c(0, 0)))+
+FigC <- ggplot(data = datafile)+
+  geom_line(mapping = aes(x = as.numeric(SampleDate - min(OnsetDate, na.rm = T)),
+                          y = CaseID,
+                          group = CaseID,
+                          color = CtN),
+            size = 1)+
+  scale_y_reverse()+
+  scale_color_viridis_c(direction = -1,
+                        option = 'D',
+                        limits = c(10, 45))+
+  scale_x_continuous(breaks = seq(0, 40, 10),
+                     limits = c(-5, 40),
+                     expand = c(0, 0))+
   theme_classic()+
-  theme(panel.grid.major.x = element_blank(),
-        panel.grid.minor.x = element_blank(),
-        axis.text = element_text(color = 'black'),
-        legend.position = 'none',
-        legend.justification = c(0, 1),
-        legend.background = element_rect(color = 'black', size = 1),
-        # legend.margin = margin(),
-        plot.margin = margin(0.2, 0.2, 0.2, 0.2, "cm"))+
-  labs(x = "Onset date",
-       y = "Time-varing reproductive number",
-       title = 'D')
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        panel.grid.major.x = element_line(color = 'grey'),
+        legend.position = c(1, 1),
+        legend.justification = c(1, 1))+
+  labs(y = 'Infections',
+       x = 'Days since start of outbreak',
+       color = 'ORF gene',
+       title = 'C')
 
-fig_a + fig_b + fig_c + fig_d&
-  theme(axis.text = element_text(size = 12),
-        axis.title = element_text(size = 14),
-        text = element_text(size = 12),
-        title = element_text(size = 16))
+# panel E -----------------------------------------------------------------
 
-ggsave('../outcome/fig.pdf', width = 10, height = 10, device = cairo_pdf)
+datafile <- DataCtValue |>
+  pivot_longer(cols = c(CtN, CtORF1ab),
+               names_to = 'Ct',
+               values_to = 'value')
+
+datafile$VaccineGroup <- datafile$VaccineDose
+
+colors <- c("#E64B35FF", "#3C5488FF", "#00A087FF")
+
+FigE <- datafile |>
+  filter(Ct == "CtN") |>
+  ggplot()+
+  stat_smooth(mapping = aes(x = as.numeric(SampleDate - OnsetDate),
+                            y = value,
+                            color = VaccineGroup,
+                            fill = VaccineGroup),
+              alpha = 0.3,
+              method = lm,
+              formula = y ~ splines::bs(x, df = 4))+
+  geom_hline(yintercept = 30)+
+  coord_cartesian(ylim = c(15, 40))+
+  scale_x_continuous(breaks = seq(-5, 20, 5),
+                     limits = c(-5, 20),
+                     expand = c(0, 0))+
+  scale_y_continuous(expand = c(0, 0))+
+  scale_color_manual(values = colors,
+                     labels = c('Unfully Vaccinated', 'Fully Vaccinated', 'Booster dose'))+
+  scale_fill_manual(values = colors)+
+  theme_classic()+
+  theme(panel.grid.major.x = element_line(color = 'grey'),
+        axis.text.x = element_blank(),
+        panel.grid.major = element_line(color = 'grey'),
+        legend.position = c(1, 0.5),
+        legend.justification = c(1, 1))+
+  labs(y = 'Cycle Threshold Value',
+       x = NULL,
+       color = NULL,
+       title = 'E')+
+  guides(fill = 'none',
+         color = guide_legend(override.aes = list(fill = 'white',
+                                                  title = NULL)))
+
+
+FigF <- datafile |>
+  filter(Ct == "CtORF1ab") |>
+  ggplot()+
+  stat_smooth(mapping = aes(x = as.numeric(SampleDate - OnsetDate),
+                            y = value,
+                            color = VaccineGroup,
+                            fill = VaccineGroup),
+              alpha = 0.3,
+              method = lm,
+              formula = y ~ splines::bs(x, df = 4))+
+  geom_hline(yintercept = 30)+
+  coord_cartesian(ylim = c(15, 40))+
+  scale_x_continuous(breaks = seq(-5, 20, 5),
+                     limits = c(-5, 20),
+                     expand = c(0, 0))+
+  scale_y_continuous(expand = c(0, 0))+
+  scale_color_manual(values = colors,
+                     labels = c('Unfully Vaccinated', 'Fully Vaccinated', 'Booster dose'))+
+  scale_fill_manual(values = colors)+
+  theme_classic()+
+  theme(panel.grid.major.x = element_line(color = 'grey'),
+        panel.grid.major = element_line(color = 'grey'),
+        legend.position = c(1, 0.5),
+        legend.justification = c(1, 1))+
+  labs(y = 'Cycle Threshold Value',
+       x = 'Days from Onset Date',
+       color = NULL,
+       title = 'F')+
+  guides(fill = 'none',
+         color = guide_legend(override.aes = list(fill = 'white',
+                                                  title = NULL)))
+
+FigA + FigB + FigC + FigD + FigE + FigF+
+  plot_layout(ncol = 2, byrow = F)
+
+ggsave('./test.pdf', width = 10, height = 8, device = cairo_pdf)
+
+# bs predict --------------------------------------------------------------
+
+testvalue <- seq(-3, 12, 0.05)
+
+spN <- datafile |>
+  filter(Ct == "CtN") |>
+  mutate(x = as.numeric(SampleDate - OnsetDate))
+spN <- lm(value ~ splines::bs(x, df = 4), data = spN)
+summary(spN)
+
+outcome <- predict(spN, data.frame(x = testvalue), interval = "predict") |>
+  as.data.frame() |>
+  mutate(x = testvalue,
+         fit = abs(fit -30),
+         lwr = abs(lwr -30),
+         upr = abs(upr - 30))
+
+spO <- datafile |>
+  filter(Ct == "CtORF1ab") |>
+  mutate(x = as.numeric(SampleDate - OnsetDate))
+spO <- lm(value ~ splines::bs(x, df = 4), data = spO)
+summary(spO)
+
+outcome <- predict(spO, data.frame(x = testvalue), interval = "predict") |>
+  as.data.frame() |>
+  mutate(x = testvalue,
+         fit = abs(fit -30),
+         lwr = abs(lwr -30),
+         upr = abs(upr - 30)) |>
+  arrange(fit)
+
+
+for (i in levels(datafile$VaccineGroup)) {
+  spN <- datafile |>
+    filter(Ct == "CtN" & VaccineGroup == i) |>
+    mutate(x = as.numeric(SampleDate - OnsetDate))
+  spN <- lm(value ~ splines::bs(x, df = 4), data = spN)
+  print(i)
+  print(summary(spN))
+  outcome <- predict(spN, data.frame(x = testvalue), interval = "predict") |>
+    as.data.frame() |>
+    mutate(x = testvalue,
+           fit = abs(fit -30),
+           lwr = abs(lwr -30),
+           upr = abs(upr - 30)) |>
+    arrange(fit)
+  print(head(outcome))
+}
+
+for (i in levels(datafile$VaccineGroup)) {
+  spO <- datafile |>
+    filter(Ct == "CtORF1ab" & VaccineGroup == i) |>
+    mutate(x = as.numeric(SampleDate - OnsetDate))
+  spO <- lm(value ~ splines::bs(x, df = 4), data = spO)
+  print(i)
+  print(summary(spO))
+  outcome <- predict(spO, data.frame(x = testvalue), interval = "predict") |>
+    as.data.frame() |>
+    mutate(x = testvalue,
+           fit = abs(fit -30),
+           lwr = abs(lwr -30),
+           upr = abs(upr - 30)) |>
+    arrange(fit)
+  print(head(outcome))
+}
+
