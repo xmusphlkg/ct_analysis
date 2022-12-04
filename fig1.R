@@ -128,7 +128,7 @@ FigC <- ggplot(data = datafile)+
   geom_line(mapping = aes(x = as.numeric(SampleDate - min(OnsetDate, na.rm = T)),
                           y = CaseID,
                           group = CaseID,
-                          color = CtN),
+                          color = CtORF1ab),
             size = 1)+
   scale_y_reverse()+
   scale_color_viridis_c(direction = -1,
